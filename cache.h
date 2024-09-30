@@ -3,14 +3,13 @@
 
 #include <stdlib.h>
 
-
 typedef long long unsigned myInt;
+typedef enum { NONE, LRU, FIFO, ARC } CachePolicy;
 
 typedef struct cacheBin {
-    myInt key; // Here the key is the number being fed into the collatz algorithm.
-    myInt data; // Here the data is the number of steps it will take for key to reach one if fed through the collatz algorithm.
+    myInt key;
+    myInt data;
 
-    
     struct cacheBin *previous;
     struct cacheBin *next;
     struct cacheBin *nextHashTable;
@@ -18,34 +17,28 @@ typedef struct cacheBin {
 } cacheBin;
 
 typedef struct Cache {
-    myInt capacity; // how many items the cache CAN hold vs...
-    myInt size;     // how many items the cach IS holding.
+    myInt cacheHits;
+    myInt cacheMisses;
+
+    myInt capacity;
+    myInt size;
 
     cacheBin *linkedListsHead;
     cacheBin *linkedListsTail;
 
-
-    // Hash table should allow for O(1) Lookup times !!
     myInt hashTablesSize;
     cacheBin **hashTable;
 
+    CachePolicy policy;
 } Cache;
 
-
-// All of the below functions are pulled directly from the lecture slides
-// Primary Methods
-
-void initializeCacheBin(Cache *cache, myInt capacity);
+void initializeCache(Cache *cache, myInt capacity, CachePolicy policy);
 void insertIntoCache(Cache *cache, myInt key, myInt data);
 void deconstructCache(Cache *cache);
-cacheBin* lookup(Cache *cache, myInt key);
+cacheBin *lookup(Cache *cache, myInt key);
 myInt countOfEntries(Cache *cache);
-
-
-// Support / Internal Methods
-
 void evict(Cache *cache, cacheBin *entry);
 void accessBin(Cache *cache, cacheBin *entry);
 myInt hashFunction(Cache *cache, myInt key);
 
-#endif // for CACHE_H
+#endif  // for CACHE_H
