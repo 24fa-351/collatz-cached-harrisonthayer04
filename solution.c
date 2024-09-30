@@ -1,105 +1,94 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 #include <unistd.h>
+
 #include "cache.h"
 
-#define IS_EVEN(x) (((x) & 1) == 0)
+#define IS_EVEN(x) (((x)&1) == 0)
 typedef long long unsigned myInt;
 
-long long unsigned int generateRandomNumber(
-    long long unsigned int nSmallestPossibleValue,
-    long long unsigned int nLargestPossibleValue) {
+myInt generateRandomNumber(myInt nSmallestPossibleValue,
+                           myInt nLargestPossibleValue) {
     // https://mathbits.com/MathBits/CompSci/LibraryFunc/rand.htm <- Inspiration
     return nSmallestPossibleValue +
            rand() % (nLargestPossibleValue - nSmallestPossibleValue + 1);
 }
 
-long long unsigned int *collatzConjecture(
-    long long unsigned int nTestValues, long long unsigned int nSmallestValue,
-    long long unsigned int nLargestValue, Cache *cache) {
-    FILE *csvFile;
-    csvFile = fopen("collatzResults.csv", "w+");
-    fprintf(csvFile, "Number,Steps\n");
-
-    myInt *results = (myInt *)malloc(nTestValues * sizeof(myInt));
-
-
-    for (long long unsigned int index = 0; index < nTestValues; index++) {
-        long long unsigned int numberOfStepsUntilOne = 0;
-        long long unsigned int randomNumber =
-            generateRandomNumber(nSmallestValue, nLargestValue);
-        long long unsigned int currentNumber = randomNumber;
-
-        myInt stackCapacity = 4096;
-        myInt *stack = (myInt *)malloc(sizeof(myInt) * stackCapacity);
-        myInt stackIndex = 0;
-
-while (currentNumber != 1) {
-            // Check if currentNumber is in cache.
-            cacheBin *entry = lookup(cache, currentNumber);
-            if (entry != NULL) {
-                // Use cached value.
-                numberOfStepsUntilOne += entry->data;
-                // Update LRU.
-                accessBin(cache, entry);
-                break;
-            }
-
-            // Store currentNumber in stack.
-            if (stackIndex >= stackCapacity) {
-                // Need to reallocate stack.
-                stackCapacity *= 2;
-                stack = (myInt *)realloc(stack, sizeof(myInt) * stackCapacity);
-            }
-            stack[stackIndex++] = currentNumber;
-
-            // Perform Collatz operation.
-            if (currentNumber % 2 == 1) {
-                currentNumber = 3 * currentNumber + 1;
-            } else {
-                currentNumber = currentNumber / 2;
-            }
-            numberOfStepsUntilOne += 1;
-        }
-        results[index] = numberOfStepsUntilOne;
-
-        // Update the cache with numbers from the stack.
-        myInt steps = numberOfStepsUntilOne;
-        for (myInt i = stackIndex; i > 0; i--) {
-            myInt num = stack[i-1];
-            insertIntoCache(cache, num, steps);
-            steps -= 1;
-        }
-        free(stack);
-
-        // Write to CSV file.
-        fprintf(csvFile, "%llu,%llu\n", randomNumber, numberOfStepsUntilOne);
+myInt collatzConjecture(myInt collatzNumber) {
+    myInt steps = 0;
+    while (collatzNumber != 1) {
+        if (IS_EVEN(collatzNumber))
+            collatzNumber = collatzNumber / 2;
+        else
+            collatzNumber = 3 * collatzNumber + 1;
+        steps++;
     }
-
-    fclose(csvFile);
-    return results;
+    return steps;
+}
+myInt collatzConjectureCached(myInt collatzNumber, Cache *cache) {
+    cacheBin *entry = lookup(cache, collatzNumber);
+    if (entry != NULL) {
+        accessBin(cache, entry);
+        cache->cacheHits++;
+        return entry->data;
+    }
+    cache->cacheMisses++;
+    myInt steps = collatzConjecture(collatzNumber);
+    insertIntoCache(cache, collatzNumber, steps);
+    return steps;
 }
 
 int main(int argc, char *argv[]) {
-    long long unsigned int userNumberOfValuesToTest = atoi(argv[1]);
-    long long unsigned int userSmallestValueToTest = atoi(argv[2]);
-    long long unsigned int userLargestValueToTest = atoi(argv[3]);
+    myInt userNumberOfValuesToTest = atoll(argv[1]);
+    myInt userSmallestValueToTest = atoll(argv[2]);
+    myInt userLargestValueToTest = atoll(argv[3]);
+    char *cachePolicy = argv[4];
 
     srand(time(NULL) ^ getpid());
 
-
-    Cache cache;
-    initializeCacheBin(&cache, 100000000);
-    long long unsigned int *output =
-        collatzConjecture(userNumberOfValuesToTest, userSmallestValueToTest,
-                          userLargestValueToTest, &cache);
-    for (long long unsigned int index = 0; index < userNumberOfValuesToTest;
-         index++) {
-        //printf("%llu: ", index + 1);
-        //printf("%llu\n", output[index]);
+    CachePolicy cachePolicyUsed;
+    if (strcmp(cachePolicy, "none") == 0)
+        cachePolicyUsed = NONE;
+    else if (strcmp(cachePolicy, "LRU") == 0)
+        cachePolicyUsed = LRU;
+    else if (strcmp(cachePolicy, "FIFO") == 0)
+        cachePolicyUsed = FIFO;
+    else {
+        printf(
+            "Error: Options for cache policy are none, LRU, and FIFO\n");
+        return 1;
     }
-    free(output);
-    deconstructCache(&cache);
-    return 0;
+    Cache cache;
+    if (cachePolicyUsed != NONE) {
+        myInt cacheSize = atoll(argv[5]);
+        initializeCache(&cache, cacheSize, cachePolicyUsed);
+    }
+    FILE *csvFile = fopen("collatzResults.csv", "w+");
+    fprintf(csvFile, "Number,Steps\n");
+    for (myInt index = 0; index < userNumberOfValuesToTest; index++) {
+        myInt randomNumber = generateRandomNumber(userSmallestValueToTest,
+                                                  userLargestValueToTest);
+        myInt stepsUntilOne;
+
+        if (cachePolicyUsed == NONE)
+            stepsUntilOne = collatzConjecture(randomNumber);
+        else
+            stepsUntilOne = collatzConjectureCached(randomNumber, &cache);
+
+        fprintf(csvFile, "%llu,%llu\n", randomNumber, stepsUntilOne);
+    }
+    fclose(csvFile);
+    if (cachePolicyUsed != NONE) {
+        myInt hitsPlusMisses = cache.cacheHits + cache.cacheMisses;
+        double cacheHitRate = 0.0;
+        if (hitsPlusMisses > 0) {
+            cacheHitRate =
+                ((double)cache.cacheHits / (double)hitsPlusMisses) * 100.0;
+        }
+        printf("Cache Hit Percentage: %.2f%%\n", cacheHitRate);
+
+        deconstructCache(&cache);
+    }
 }
